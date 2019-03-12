@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+
 	"os"
 	"path"
 	"strconv"
 	"strings"
+
+	"encoding/json"
 
 	"github.com/excelize"
 	//	"LuaAdapter"
@@ -62,8 +65,9 @@ func Generate(filePath string, tPath string) {
 		return
 	}
 
-	var lines []string
 	colCellTypeMap := make(map[int]*ExcelData)
+	var lineData [][]interface{}
+
 	for rowIndex, row := range rows {
 		var objValAry []interface{}
 		var errStr = ""
@@ -101,43 +105,17 @@ func Generate(filePath string, tPath string) {
 				fmt.Println(fileName + ":" + errStr)
 				return
 			}
-			var strLine = "{ "
-			var objValCount = len(objValAry)
-			for i := range objValAry {
-				typeData, ok := colCellTypeMap[i]
-				if !ok {
-					fmt.Println(fileName + ":" + string(i) + " endError")
-					return
-				}
-				var strVal = TransitTypeVal(typeData.Name, objValAry[i])
-				strLine += strVal
-				if i < objValCount-1 {
-					strLine += ", "
-				}
-			}
-			strLine += "}"
-			lines = append(lines, strLine)
+			lineData = append(lineData, objValAry)
 		}
 	}
 
-	var strAll = fileName + " = {\n"
-	var lineCount = len(lines)
-	for i := range lines {
-		strAll += "    " + lines[i]
-		if i < lineCount-1 {
-			strAll += ",\n"
-		}
-	}
-	strAll += "\n}"
-	//	fmt.Println(strAll)
-	tPath = fmt.Sprintf("%v%v.lua", tPath, fileName)
-	data := []byte(strAll)
-	wErr := ioutil.WriteFile(tPath, data, 0644)
-	if wErr != nil {
-		fmt.Sprintf("%v write lua file Error:%v", tPath, wErr.Error())
-		return
-	}
-	fmt.Println(filePath + " sucess!")
+	jsonPath := fmt.Sprintf("%v%v.json", tPath, fileName)
+	CreateToJson(jsonPath, colCellTypeMap, lineData)
+
+	luaPath := fmt.Sprintf("%v%v.lua", tPath, fileName)
+	CreateToLua(luaPath, fileName, colCellTypeMap, lineData)
+
+	fmt.Println(filePath + " Complete!")
 }
 
 func Transit(typeData *ExcelData, val string) (interface{}, error) {
@@ -210,6 +188,71 @@ func Transit(typeData *ExcelData, val string) (interface{}, error) {
 		return valAry, nil
 	}
 	return nil, nil
+}
+
+func CreateToLua(luaPath string, fileName string, colCellTypeMap map[int]*ExcelData, lineData [][]interface{}) {
+	var strAll = fileName + " = {\n"
+	var lineCount = len(lineData)
+
+	for m := range lineData {
+		var objValAry = lineData[m]
+		var strLine = "{ "
+		var objValCount = len(objValAry)
+		for i := range objValAry {
+			typeData, ok := colCellTypeMap[i]
+			if !ok {
+				fmt.Println(string(i) + " UnKnowlineError")
+				return
+			}
+			var strVal = TransitTypeVal(typeData.Name, objValAry[i])
+			strLine += strVal
+			if i < objValCount-1 {
+				strLine += ", "
+			}
+		}
+		strLine += "}"
+		strAll += "    " + strLine
+		if m < lineCount-1 {
+			strAll += ",\n"
+		}
+	}
+	strAll += "\n}"
+
+	data := []byte(strAll)
+	wErr := ioutil.WriteFile(luaPath, data, 0644)
+	if wErr != nil {
+		fmt.Sprintf("%v write lua file Error:%v", luaPath, wErr.Error())
+		return
+	}
+}
+
+func CreateToJson(jsonPath string, colCellTypeMap map[int]*ExcelData, lineData [][]interface{}) {
+	var newLineData []interface{}
+	for m := range lineData {
+		var objValAry = lineData[m]
+		var objValMap = make(map[string]interface{})
+		for i := range objValAry {
+			typeData, ok := colCellTypeMap[i]
+			if !ok {
+				fmt.Println(string(i) + " UnKnowlineError")
+				return
+			}
+			objValMap[typeData.Name] = objValAry[i]
+		}
+		newLineData = append(newLineData, objValMap)
+	}
+
+	jsonStr, jErr := json.Marshal(newLineData)
+	if jErr != nil {
+		fmt.Printf("%v json marshal err:", jErr)
+	} else {
+		wErr := ioutil.WriteFile(jsonPath, jsonStr, 0644)
+		if wErr != nil {
+			fmt.Sprintf("%v write json file Error:%v", jsonPath, wErr.Error())
+			return
+		}
+	}
+
 }
 
 func TransitTypeVal(keyName string, val interface{}) string {
